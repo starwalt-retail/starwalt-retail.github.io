@@ -12,3 +12,81 @@ const baseAdmin=adminRender;adminRender=function(){if(!['Purchasing','Returns'].
 function renderOperations(){if(activeTab==='Purchasing'){$('#adminContent').innerHTML=`<div class="section-heading"><div><p class="eyebrow">KEEP YOUR SHELVES READY</p><h2>Supplier purchasing</h2></div><button class="btn dark" id="newPurchase">Create purchase order</button></div><p>Receive demo deliveries to increase local stock. No order is sent to a supplier.</p><div class="metrics"><div class="metric"><p>Open purchases</p><strong>${state.purchases.filter(p=>p.status==='Ordered').length}</strong></div><div class="metric"><p>Low-stock items</p><strong>${products.filter(p=>p.stock<10).length}</strong></div><div class="metric"><p>Purchase value</p><strong>${money(state.purchases.reduce((s,p)=>s+p.qty*p.cost,0))}</strong></div></div><div class="workspace-card"><table><thead><tr><th>PO reference</th><th>Supplier</th><th>Product</th><th>Quantity</th><th>Cost</th><th>Status</th><th>Action</th></tr></thead><tbody>${state.purchases.map((p,i)=>`<tr><td>${p.id}</td><td>${esc(p.supplier)}</td><td>${products.find(x=>x.id===p.productId).name}</td><td>${p.qty}</td><td>${money(p.qty*p.cost)}</td><td><span class="badge">${p.status}</span></td><td>${p.status==='Ordered'?`<button class="btn dark" data-receive="${i}">Receive stock</button>`:'Received into inventory'}</td></tr>`).join('')||'<tr><td colspan="7">No purchase orders. Create one to try supplier receiving.</td></tr>'}</tbody></table></div>`;$('#newPurchase').onclick=purchaseForm;document.querySelectorAll('[data-receive]').forEach(b=>b.onclick=()=>{const p=state.purchases[+b.dataset.receive];if(p.status!=='Ordered')return;p.status='Received';products.find(x=>x.id===p.productId).stock+=p.qty;localStorage.setItem('starwalt-stock',JSON.stringify(products.map(p=>p.stock)));persist();render();adminRender();toast('Stock received into demo inventory')})}
 if(activeTab==='Returns'){$('#adminContent').innerHTML=`<h2>Returns desk</h2><p>Review customer demo requests. Status changes do not issue payments or restock inventory.</p><div class="workspace-card"><table><thead><tr><th>Request</th><th>Order</th><th>Reason</th><th>Details</th><th>Resolution</th></tr></thead><tbody>${state.returns.map((r,i)=>`<tr><td>${r.id}</td><td>${r.orderId}</td><td>${esc(r.reason)}</td><td style="white-space:normal;max-width:250px">${esc(r.note||'—')}</td><td><select data-return-status="${i}" aria-label="Return resolution">${['Requested','Approved','Rejected','Completed'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select></td></tr>`).join('')||'<tr><td colspan="5">No return requests. Use My account to request a return on a delivered order.</td></tr>'}</tbody></table></div>`;document.querySelectorAll('[data-return-status]').forEach(s=>s.onchange=()=>{state.returns[+s.dataset.returnStatus].status=s.value;persist();toast('Return resolution updated')})}}
 function purchaseForm(){modal(`<p class="eyebrow">SUPPLIER WORKSPACE</p><h2>New purchase order</h2><p class="notice">Demo only. This does not contact a supplier or commit spending.</p><form id="purchaseForm"><label>Supplier<input name="supplier" required maxlength="80" placeholder="Sample supplier"></label><label>Product<select name="product">${products.map(p=>`<option value="${p.id}">${p.name}</option>`).join('')}</select></label><label>Quantity<input name="qty" type="number" min="1" max="10000" step="1" required value="10"></label><label>Unit cost (₹)<input name="cost" type="number" min="1" max="1000000" step="0.01" required value="300"></label><button class="btn dark">Create demo purchase</button></form>`);$('#purchaseForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);state.purchases.push({id:'PO-'+Date.now().toString().slice(-7),supplier:f.get('supplier'),productId:+f.get('product'),qty:+f.get('qty'),cost:+f.get('cost'),status:'Ordered'});persist();close();adminRender();toast('Demo purchase order created')}}
+
+// Discovery, reviews, and business enquiry demos.
+(() => {
+  const ensure = () => { state.reviews ??= []; state.recent ??= []; state.enquiries ??= []; };
+  ensure();
+  const styles = document.createElement('style');
+  styles.textContent = '.retail-discovery{margin:0 5% 50px;padding:32px;background:#edf1e6;border-radius:8px}.retail-discovery h2{font-size:30px;margin:0 0 12px}.discovery-actions{display:flex;gap:12px;flex-wrap:wrap;margin:22px 0}.mini-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px}.mini-find{border:1px solid #dce2dc;border-radius:7px;padding:15px;background:white;text-align:left}.mini-find img{width:100%;height:130px;object-fit:cover;border-radius:5px}.mini-find span{display:block;margin-top:10px;font-size:14px}.review-entry{border-bottom:1px solid #dce2dc;padding:18px 0}.review-entry p{line-height:1.7;overflow-wrap:anywhere}.review-score{font-size:26px;color:#244d40}.quote-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}.quote-card{padding:22px;background:white;border:1px solid #dce2dc;border-radius:8px}.quote-card p{overflow-wrap:anywhere;line-height:1.6}.quote-card label{display:grid;gap:8px;margin-top:15px}.quote-card strong{font-size:24px}';
+  document.head.append(styles);
+  const discovery = document.createElement('section');
+  discovery.className = 'retail-discovery';
+  discovery.innerHTML = '<p class="eyebrow">A LITTLE MORE TO DISCOVER</p><h2>Find it. Love it. Make it yours.</h2><p>Pick up where you left off, or plan a bigger order for your business.</p><div class="discovery-actions"><button class="btn dark" id="recentFinds">Recently viewed</button><button class="btn dark" id="bulkEnquiry">Bulk & business orders</button></div><p style="font-size:14px;color:#65736b">Local demonstration · Enquiries and reviews stay on this device.</p>';
+  document.querySelector('#experience').before(discovery);
+  function showRecent() {
+    ensure();
+    modal('<p class="eyebrow">PICK UP WHERE YOU LEFT OFF</p><h2>Recently viewed</h2>' + (state.recent.length ? '<div class="mini-grid">' + state.recent.map(id => {
+      const p = products.find(p => p.id === id);
+      return p ? '<button class="mini-find" data-detail="' + p.id + '"><img src="' + img(p) + '" alt="' + p.name + '"><span>' + p.name + '</span><span>' + money(p.price) + '</span></button>' : '';
+    }).join('') + '</div>' : '<p>Open a product from the collection to start your list.</p>') + '<p class="notice">Your last six product views are saved on this device.</p>');
+  }
+  document.querySelector('#recentFinds').onclick = showRecent;
+  document.querySelector('#bulkEnquiry').onclick = () => enquiryForm();
+  const previousDetail = detail;
+  detail = function(id) {
+    ensure();
+    state.recent = [id, ...state.recent.filter(x => x !== id)].slice(0, 6);
+    persist();
+    previousDetail(id);
+    const p = products.find(p => p.id === id);
+    const reviews = state.reviews.filter(r => r.productId === id);
+    const avg = reviews.length ? (reviews.reduce((s,r) => s + r.rating, 0) / reviews.length).toFixed(1) : null;
+    const section = document.createElement('section');
+    section.innerHTML = '<hr style="border:0;border-top:1px solid #dce2dc;margin:28px 0"><h3>Customer reviews</h3><p>' + (avg ? '<span class="review-score">' + avg + ' / 5</span> · ' + reviews.length + ' local demo reviews' : 'No local reviews yet. Be the first to try the review demo.') + '</p>' + reviews.map(r => '<article class="review-entry"><b>' + esc(r.name) + '</b><p>' + '★'.repeat(r.rating) + ' · ' + esc(r.date) + '</p><p>' + esc(r.comment) + '</p><small>Unverified demo review</small></article>').join('') + '<form id="retailReview"><label>Display name<input name="name" required maxlength="50" placeholder="Demo shopper"></label><label>Rating<select name="rating"><option value="5">5 — Excellent</option><option value="4">4 — Good</option><option value="3">3 — Average</option><option value="2">2 — Below expectations</option><option value="1">1 — Poor</option></select></label><label>Your review<textarea name="comment" required maxlength="600" placeholder="Use sample feedback for this demo"></textarea></label><button class="btn dark">Save demo review</button></form><p class="notice">Reviews are unverified and saved on this device only.</p><button class="btn dark full" id="productQuote">Request a bulk quote for this product</button>';
+    document.querySelector('#panelContent').append(section);
+    document.querySelector('#retailReview').onsubmit = e => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      state.reviews.push({ productId: id, name: f.get('name').trim(), rating: Number(f.get('rating')), comment: f.get('comment').trim(), date: new Date().toLocaleDateString('en-IN') });
+      persist(); detail(id); toast('Demo review saved');
+    };
+    document.querySelector('#productQuote').onclick = () => enquiryForm(id);
+  };
+  function enquiryForm(productId) {
+    ensure();
+    modal('<p class="eyebrow">BIGGER PLANS. THOUGHTFUL FINDS.</p><h2>Bulk & business orders</h2><p class="notice">Demonstration only. Use sample contact information. This request is saved on your device and is not sent to a business.</p><form id="bulkForm"><label>Business name<input name="business" required maxlength="80" placeholder="Demo business"></label><label>Contact email<input name="email" type="email" required maxlength="120" placeholder="demo@example.com"></label><label>Product<select name="product">' + products.map(p => '<option value="' + p.id + '" ' + (p.id === productId ? 'selected' : '') + '>' + p.name + '</option>').join('') + '</select></label><label>Quantity<input name="quantity" required type="number" min="10" max="10000" step="1" value="10"></label><label>Requirements<textarea name="requirements" maxlength="500" placeholder="Packaging, branding, or delivery requirements"></textarea></label><div class="notice" id="bulkEstimate"></div><button class="btn dark">Save demo enquiry</button></form>');
+    const form = document.querySelector('#bulkForm');
+    const estimate = () => {
+      const p = products.find(p => p.id === Number(form.elements.product.value));
+      const qty = Number(form.elements.quantity.value);
+      document.querySelector('#bulkEstimate').textContent = 'Catalog estimate: ' + money(p.price * (Number.isFinite(qty) ? qty : 0)) + '. Final pricing, tax, shipping, and stock require confirmation. No bulk discount is automatically applied.';
+    };
+    form.elements.product.onchange = estimate;
+    form.elements.quantity.oninput = estimate;
+    estimate();
+    form.onsubmit = e => {
+      e.preventDefault();
+      const f = new FormData(form);
+      const p = products.find(p => p.id === Number(f.get('product')));
+      const q = { id: 'BQ-' + Date.now().toString().slice(-8), business: f.get('business').trim(), email: f.get('email').trim(), productId: p.id, quantity: Number(f.get('quantity')), requirements: f.get('requirements').trim(), estimate: p.price * Number(f.get('quantity')), status: 'New', date: new Date().toLocaleDateString('en-IN') };
+      state.enquiries.unshift(q); persist();
+      modal('<p class="eyebrow">READY FOR REVIEW</p><h2>Demo enquiry saved.</h2><p>Reference: <b>' + q.id + '</b></p><p>' + esc(p.name) + ' × ' + q.quantity + '</p><p>Catalog estimate: ' + money(q.estimate) + '</p><p class="notice">No enquiry was sent. Explore Business enquiries in the retail dashboard to manage this local request.</p><button id="downloadEnquiry" class="btn dark">Download enquiry summary</button>');
+      document.querySelector('#downloadEnquiry').onclick = () => download(q.id + '.txt', 'STARWALT RETAIL — DEMO ENQUIRY\nReference: ' + q.id + '\nBusiness: ' + q.business + '\nProduct: ' + p.name + '\nQuantity: ' + q.quantity + '\nCatalog estimate: ' + money(q.estimate) + '\nRequirements: ' + q.requirements + '\nNot a confirmed quote or order. No request sent.');
+    };
+  }
+  const previousAdmin = adminRender;
+  adminRender = function() {
+    ensure();
+    if (activeTab === 'Business enquiries') {
+      const tabs = ['Overview','Orders','Inventory','Customers','Point of sale','Reports','Promotions','Settings','Purchasing','Returns'];
+      document.querySelector('#adminTabs').innerHTML = tabs.map(t => '<button data-tab="' + t + '">' + t + '</button>').join('');
+      document.querySelector('#adminContent').innerHTML = '<p class="eyebrow">TURN INTEREST INTO OPPORTUNITY</p><h2>Business enquiries</h2><p>Local enquiry pipeline. Status updates do not send messages, reserve stock, or create orders.</p><div class="metrics"><div class="metric"><p>Total enquiries</p><strong>' + state.enquiries.length + '</strong></div><div class="metric"><p>Open enquiries</p><strong>' + state.enquiries.filter(q => !['Won','Closed'].includes(q.status)).length + '</strong></div><div class="metric"><p>Catalog opportunity value</p><strong>' + money(state.enquiries.filter(q => q.status !== 'Closed').reduce((s,q) => s + q.estimate, 0)) + '</strong></div></div><div class="quote-grid">' + (state.enquiries.length ? state.enquiries.map((q,i) => {
+        const p = products.find(p => p.id === q.productId);
+        return '<article class="quote-card"><p class="eyebrow">' + q.id + '</p><h3>' + esc(q.business) + '</h3><p>' + esc(q.email) + '</p><p>' + esc(p.name) + ' × ' + q.quantity + '</p><strong>' + money(q.estimate) + '</strong><p>' + esc(q.requirements || 'No extra requirements') + '</p><p>' + q.date + '</p><label>Pipeline stage<select data-enquiry-stage="' + i + '">' + ['New','Contacted','Quoted','Won','Closed'].map(s => '<option ' + (q.status === s ? 'selected' : '') + '>' + s + '</option>').join('') + '</select></label></article>';
+      }).join('') : '<article class="quote-card"><h3>Your pipeline starts here.</h3><p>Use Bulk & business orders in the storefront to create a sample enquiry.</p></article>') + '</div>';
+      document.querySelectorAll('[data-enquiry-stage]').forEach(s => s.onchange = () => { state.enquiries[Number(s.dataset.enquiryStage)].status = s.value; persist(); adminRender(); toast('Demo enquiry stage updated'); });
+    } else previousAdmin();
+    const b = document.createElement('button'); b.textContent = 'Business enquiries'; b.dataset.tab = 'Business enquiries'; b.classList.toggle('active', activeTab === 'Business enquiries'); document.querySelector('#adminTabs').append(b);
+  };
+})();
