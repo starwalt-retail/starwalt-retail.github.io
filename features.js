@@ -90,3 +90,49 @@ function purchaseForm(){modal(`<p class="eyebrow">SUPPLIER WORKSPACE</p><h2>New 
     const b = document.createElement('button'); b.textContent = 'Business enquiries'; b.dataset.tab = 'Business enquiries'; b.classList.toggle('active', activeTab === 'Business enquiries'); document.querySelector('#adminTabs').append(b);
   };
 })();
+
+// Fulfilment and stock interest are simulated, device-local workflows.
+(() => {
+  const setup = () => { state.stockAlerts ??= []; state.deliveryZones ??= [{prefix:'600',name:'Chennai demo zone',days:'2–4 business days'},{prefix:'632',name:'Vellore demo zone',days:'1–3 business days'}]; };
+  setup();
+  const detailBeforeFulfilment = detail;
+  detail = function(id) {
+    setup(); detailBeforeFulfilment(id);
+    const p = products.find(p => p.id === id);
+    const block = document.createElement('section');
+    block.className = 'account-card';
+    block.innerHTML = '<h3>Delivery & availability</h3><p>Available stock: <b>'+p.stock+'</b></p><form id="deliveryCheck"><label>Delivery PIN code<input name="pin" inputmode="numeric" pattern="[1-9][0-9]{5}" maxlength="6" required placeholder="Try 600001 or 632001"></label><button class="btn dark">Check demo delivery</button></form><p id="deliveryResult" role="status"></p><button class="text-btn" id="stockInterest">Request a stock update</button><p style="font-size:14px">Sample delivery areas only. No courier lookup or email is performed.</p>';
+    document.querySelector('#panelContent').append(block);
+    document.querySelector('#deliveryCheck').onsubmit = e => {
+      e.preventDefault();
+      const pin = new FormData(e.target).get('pin').trim();
+      const zone = state.deliveryZones.find(z => pin.startsWith(z.prefix));
+      document.querySelector('#deliveryResult').textContent = zone ? (p.stock > 0 ? zone.name+': estimated '+zone.days+'. Estimate only; shipping cost is calculated in your bag.' : 'This demo area is supported, but the item is out of stock. Request a stock update below.') : 'This PIN is outside the configured demo areas. Try store pickup or request a stock update.';
+    };
+    document.querySelector('#stockInterest').onclick = () => interestForm(id);
+  };
+  function interestForm(id) {
+    setup(); const p = products.find(p=>p.id===id);
+    modal('<p class="eyebrow">DON’T MISS YOUR NEXT FIND</p><h2>Stock updates</h2><h3>'+p.name+'</h3><p class="notice">Local demo only. Use a sample email address. No email is sent and no stock is reserved.</p><form id="stockForm"><label>Email<input name="email" type="email" required maxlength="120" placeholder="demo@example.com"></label><label>Quantity wanted<input name="qty" type="number" min="1" max="1000" step="1" required value="1"></label><button class="btn dark">Save demo stock request</button></form>');
+    document.querySelector('#stockForm').onsubmit = e => {
+      e.preventDefault(); const f = new FormData(e.target); const email=f.get('email').trim().toLowerCase();
+      if(state.stockAlerts.some(a=>a.productId===id&&a.email===email&&a.status==='Waiting')) { toast('You already have a waiting request for this product'); return; }
+      const request={id:'SA-'+Date.now().toString().slice(-8),productId:id,email,qty:Number(f.get('qty')),status:'Waiting',date:new Date().toLocaleDateString('en-IN')};
+      state.stockAlerts.unshift(request);persist();
+      modal('<p class="eyebrow">REQUEST SAVED</p><h2>We’ve saved your interest.</h2><p>Reference: <b>'+request.id+'</b></p><p>'+p.name+' × '+request.qty+'</p><p class="notice">Saved on this device only. Staff can review it under Stock alerts. No email will be sent automatically.</p>');
+    };
+  }
+  const adminBeforeFulfilment=adminRender;
+  adminRender=function(){
+    setup();
+    if(activeTab==='Stock alerts'){
+      document.querySelector('#adminTabs').innerHTML=['Overview','Orders','Inventory','Customers','Point of sale','Reports','Promotions','Settings','Purchasing','Returns','Business enquiries'].map(t=>'<button data-tab="'+t+'">'+t+'</button>').join('');
+      const waiting=state.stockAlerts.filter(a=>a.status==='Waiting');
+      document.querySelector('#adminContent').innerHTML='<p class="eyebrow">PLAN YOUR NEXT RESTOCK</p><h2>Stock alerts</h2><p>Review device-local customer interest. Completing a request does not send a notification.</p><div class="metrics"><div class="metric"><p>Waiting requests</p><strong>'+waiting.length+'</strong></div><div class="metric"><p>Units requested</p><strong>'+waiting.reduce((s,a)=>s+a.qty,0)+'</strong></div><div class="metric"><p>Ready to review</p><strong>'+waiting.filter(a=>products.find(p=>p.id===a.productId).stock>=a.qty).length+'</strong></div></div><div class="workspace-card"><table><thead><tr><th>Reference</th><th>Product</th><th>Email</th><th>Wanted</th><th>Available</th><th>Status</th></tr></thead><tbody>'+(state.stockAlerts.map((a,i)=>{const p=products.find(p=>p.id===a.productId);return '<tr><td>'+a.id+'</td><td>'+p.name+'</td><td>'+esc(a.email)+'</td><td>'+a.qty+'</td><td>'+p.stock+'</td><td><select aria-label="Stock request status" data-stock-stage="'+i+'">'+['Waiting','Reviewed','Completed','Cancelled'].map(s=>'<option '+(s===a.status?'selected':'')+'>'+s+'</option>').join('')+'</select></td></tr>';}).join('')||'<tr><td colspan="6">No requests yet. Open a product and choose Request a stock update.</td></tr>')+'</tbody></table></div><div class="workspace-card"><h3>Demo delivery areas</h3><p>PIN prefixes shown below are illustrative configuration, not a claim about actual courier service.</p><div id="zones">'+state.deliveryZones.map((z,i)=>'<p>'+esc(z.prefix)+' · '+esc(z.name)+' · '+esc(z.days)+' <button data-remove-zone="'+i+'">Remove demo zone</button></p>').join('')+'</div><form id="zoneForm" class="shop-tools"><label>PIN prefix<input name="prefix" required pattern="[1-9][0-9]{2}" maxlength="3" placeholder="600"></label><label>Area name<input name="name" required maxlength="60" placeholder="Sample service area"></label><label>Delivery estimate<input name="days" required maxlength="60" placeholder="2–4 business days"></label><button class="btn dark">Add demo area</button></form><p id="zoneError" role="status"></p></div>';
+      document.querySelectorAll('[data-stock-stage]').forEach(s=>s.onchange=()=>{state.stockAlerts[Number(s.dataset.stockStage)].status=s.value;persist();adminRender();toast('Demo request updated; no email sent')});
+      document.querySelectorAll('[data-remove-zone]').forEach(b=>b.onclick=()=>{state.deliveryZones.splice(Number(b.dataset.removeZone),1);persist();adminRender()});
+      document.querySelector('#zoneForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);if(state.deliveryZones.some(z=>z.prefix===f.get('prefix'))){document.querySelector('#zoneError').textContent='This PIN prefix is already configured.';return;}state.deliveryZones.push({prefix:f.get('prefix'),name:f.get('name').trim(),days:f.get('days').trim()});persist();adminRender();toast('Demo delivery area added')};
+    }else adminBeforeFulfilment();
+    const b=document.createElement('button');b.textContent='Stock alerts';b.dataset.tab='Stock alerts';b.classList.toggle('active',activeTab==='Stock alerts');document.querySelector('#adminTabs').append(b);
+  };
+})();
