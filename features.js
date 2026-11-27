@@ -136,3 +136,57 @@ function purchaseForm(){modal(`<p class="eyebrow">SUPPLIER WORKSPACE</p><h2>New 
     const b=document.createElement('button');b.textContent='Stock alerts';b.dataset.tab='Stock alerts';b.classList.toggle('active',activeTab==='Stock alerts');document.querySelector('#adminTabs').append(b);
   };
 })();
+
+
+// Gift discovery and a local operating-expense register.
+(() => {
+  const init = () => { state.expenses ??= []; };
+  init();
+  const actions=document.querySelector('.discovery-actions');
+  for(const [label,run] of [['Gift finder',giftFinder],['Curated bundles',bundles]]){
+    const b=document.createElement('button'); b.className='btn dark'; b.textContent=label; b.onclick=run; actions.append(b);
+  }
+  function giftFinder(){
+    modal('<p class="eyebrow">A THOUGHTFUL LITTLE SOMETHING</p><h2>Find the right gift.</h2><form id="giftForm"><label>Maximum product budget (₹)<input name="budget" type="number" min="1" max="100000" required value="1500"></label><label>Collection<select name="category"><option>All</option>'+[...new Set(products.map(p=>p.cat))].map(c=>'<option>'+c+'</option>').join('')+'</select></label><button class="btn dark">Find gifts</button></form><p class="notice">Product prices only. Shipping is calculated in your bag.</p><div id="giftMatches" class="mini-grid" style="margin-top:20px"></div>');
+    document.querySelector('#giftForm').onsubmit=e=>{
+      e.preventDefault(); const f=new FormData(e.target);
+      const matches=products.filter(p=>p.price<=Number(f.get('budget'))&&p.stock>0&&(f.get('category')==='All'||p.cat===f.get('category'))).sort((a,b)=>a.price-b.price);
+      document.querySelector('#giftMatches').innerHTML=matches.length?matches.map(p=>'<button class="mini-find" data-detail="'+p.id+'"><img src="'+img(p)+'" alt="'+p.name+'"><span>'+p.name+'</span><span>'+money(p.price)+'</span></button>').join(''):'<p>No in-stock gifts match. Increase your budget or try another collection.</p>';
+    };document.querySelector('#giftForm').requestSubmit();
+  }
+  const sets=[{name:'Slow morning set',ids:[4,7],note:'A little greenery and a favourite morning ritual.'},{name:'On the go set',ids:[1,6],note:'An everyday carryall with a considered finishing touch.'},{name:'Weekend essentials',ids:[5,8],note:'Easygoing pieces for a relaxed weekend.'}];
+  function bundles(){
+    modal('<p class="eyebrow">GOOD THINGS GO TOGETHER</p><h2>Curated bundles</h2><p>Two complementary finds, one easy add. Catalog prices apply; no extra bundle discount.</p>'+sets.map((set,i)=>{
+      const list=set.ids.map(id=>products.find(p=>p.id===id)); const ready=list.every(p=>remaining(p.id)>0);
+      return '<article class="account-card"><h3>'+set.name+'</h3><p>'+set.note+'</p><p>'+list.map(p=>p.name+' · '+money(p.price)).join('<br>')+'</p><h3>'+money(list.reduce((s,p)=>s+p.price,0))+'</h3><button class="btn dark" data-bundle="'+i+'" '+(ready?'':'disabled')+'>'+(ready?'Add bundle to bag':'Not enough stock')+'</button></article>';
+    }).join(''));
+    document.querySelectorAll('[data-bundle]').forEach(b=>b.onclick=()=>{
+      const set=sets[Number(b.dataset.bundle)];if(set.ids.some(id=>remaining(id)<1)){toast('Stock changed. Please review this bundle.');bundles();return;}
+      set.ids.forEach(id=>add(id));toast('Both bundle items added to your bag');bundles();
+    });
+  }
+  function remaining(id){return products.find(p=>p.id===id).stock-state.cart.filter(i=>i.id===id).reduce((s,i)=>s+i.qty,0)}
+  const beforeExpenses=adminRender;
+  let expenseMonth=new Date().toISOString().slice(0,7);
+  adminRender=function(){
+    init();
+    if(activeTab==='Expenses'){
+      document.querySelector('#adminTabs').innerHTML=['Overview','Orders','Inventory','Customers','Point of sale','Reports','Promotions','Settings','Purchasing','Returns','Business enquiries','Stock alerts'].map(t=>'<button data-tab="'+t+'">'+t+'</button>').join('');
+      const rows=state.expenses.filter(x=>!expenseMonth||x.date.startsWith(expenseMonth));
+      const active=rows.filter(x=>!x.voided);const sum=active.reduce((s,x)=>s+x.amount,0);
+      document.querySelector('#adminContent').innerHTML='<div class="section-heading"><div><p class="eyebrow">UNDERSTAND YOUR STORE COSTS</p><h2>Operating expenses</h2></div><button class="btn dark" id="newExpense">Record expense</button></div><p class="notice">Local demonstration register. Entries do not move money or calculate tax. This is an expense total, not profit.</p><div class="shop-tools"><label>Filter month<input id="expenseMonth" type="month" value="'+expenseMonth+'"></label><button class="btn dark" id="exportExpenses">Download expenses CSV</button></div><div class="metrics"><div class="metric"><p>Active expenses</p><strong>'+active.length+'</strong></div><div class="metric"><p>Total recorded</p><strong>'+money(sum)+'</strong></div><div class="metric"><p>Voided entries</p><strong>'+rows.filter(x=>x.voided).length+'</strong></div></div><div class="workspace-card"><table><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>'+(rows.map(x=>'<tr><td>'+esc(x.date)+'</td><td>'+esc(x.category)+'</td><td style="white-space:normal;max-width:250px">'+esc(x.description)+'</td><td>'+money(x.amount)+'</td><td>'+(x.voided?'Voided':'Recorded')+'</td><td><button data-expense-toggle="'+x.id+'">'+(x.voided?'Restore entry':'Void entry')+'</button></td></tr>').join('')||'<tr><td colspan="6">No expenses in this month. Record a sample store cost to start.</td></tr>')+'</tbody></table></div><div class="workspace-card"><h3>Category breakdown</h3>'+[...new Set(active.map(x=>x.category))].map(c=>'<p>'+esc(c)+' <b>'+money(active.filter(x=>x.category===c).reduce((s,x)=>s+x.amount,0))+'</b></p>').join('')+'</div>';
+      document.querySelector('#expenseMonth').onchange=e=>{expenseMonth=e.target.value;adminRender()};
+      document.querySelector('#newExpense').onclick=expenseForm;
+      document.querySelectorAll('[data-expense-toggle]').forEach(b=>b.onclick=()=>{const x=state.expenses.find(x=>x.id===b.dataset.expenseToggle);x.voided=!x.voided;persist();adminRender()});
+      document.querySelector('#exportExpenses').onclick=()=>{
+        const cell=v=>'"'+String(v).replace(/^[=+@\-]/,"'$&").replaceAll('"','""')+'"';
+        download('starwalt-expenses-'+(expenseMonth||'all')+'.csv',['Date,Category,Description,Amount INR,Status',...rows.map(x=>[x.date,x.category,x.description,x.amount,x.voided?'Voided':'Recorded'].map(cell).join(','))].join('\r\n'),'text/csv');
+      };
+    }else beforeExpenses();
+    const b=document.createElement('button');b.textContent='Expenses';b.dataset.tab='Expenses';b.classList.toggle('active',activeTab==='Expenses');document.querySelector('#adminTabs').append(b);
+  };
+  function expenseForm(){
+    modal('<p class="eyebrow">KEEP A CLEAR RECORD</p><h2>Record a store expense</h2><p class="notice">Use sample details. Saved only on this device; no payment occurs.</p><form id="expenseForm"><label>Date<input name="date" type="date" required value="'+new Date().toISOString().slice(0,10)+'"></label><label>Category<select name="category">'+['Rent','Utilities','Staff','Marketing','Packaging','Transport','Maintenance','Other'].map(c=>'<option>'+c+'</option>').join('')+'</select></label><label>Description<input name="description" required maxlength="160" placeholder="Sample monthly rent"></label><label>Amount (₹)<input name="amount" type="number" min="0.01" max="10000000" step="0.01" required></label><button class="btn dark">Save demo expense</button></form>');
+    document.querySelector('#expenseForm').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);state.expenses.unshift({id:crypto.randomUUID(),date:f.get('date'),category:f.get('category'),description:f.get('description').trim(),amount:Number(f.get('amount')),voided:false});expenseMonth=f.get('date').slice(0,7);persist();close();adminRender();toast('Demo expense recorded')};
+  }
+})();
